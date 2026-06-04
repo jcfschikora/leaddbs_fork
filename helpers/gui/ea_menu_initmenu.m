@@ -186,6 +186,12 @@ if isempty(menuprobe)
         end
     end
 
+    % add upload to sdrive menu
+    u = uimenu('Label','Upload');
+    % Add submenu items for Upload
+    uimenu(u,'Label','Upload to S-Drive','Callback',{@js_upload2sdrive,handles});
+    uimenu(u,'Label','Update Patient Metadata','Callback',{@js_update_metadata,handles});
+
     % mark that menu has already been installed.
 	setappdata(handles.leadfigure,'menuprobe',1);
 end
