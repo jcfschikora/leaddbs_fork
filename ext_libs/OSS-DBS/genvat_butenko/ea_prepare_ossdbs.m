@@ -31,6 +31,8 @@ if ~isfield(options.prefs.machine.vatsettings,'butenko_cond_model')
     settings.cond_model = 'ColeCole4';
 elseif strcmp(options.prefs.machine.vatsettings.butenko_cond_model,'Homogeneous')
     settings.cond_model = 'Constant';
+    % to avoid CSF filtering altogether
+    settings.butenko_segmAlg = 'Atlas Based';
 else
     settings.cond_model = options.prefs.machine.vatsettings.butenko_cond_model;
 end
@@ -93,7 +95,8 @@ if settings.optimizer || settings.trainANN
     settings.stimSetMode = 1; % OSS-DBS will solve a "unit" problem
 end
 
-if (settings.optimizer || settings.trainANN || settings.stimSetMode) && strcmp(settings.butenko_intersectStatus,'activated_at_active_contacts')
+if (settings.optimizer || settings.trainANN) && strcmp(settings.butenko_intersectStatus,'activated_at_active_contacts')
+      % this settings does not affect optimizer (works on the pathway level, use info from Pathways_status_*.jsons)
     ea_error("Option 'Activated near active contacts' is not supported for StimSet mode")
 end
 

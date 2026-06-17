@@ -204,6 +204,11 @@ classdef ea_unifiedmapping < handle
                     end
                     obj.M.patient.group=obj.M.ROI.group; % copies
                 else
+                    datasetFolder = regexp(obj.leadgroup, ['(.*)(?=\', filesep, 'derivatives\', filesep, 'leadgroup)'], 'match', 'once');
+                    for i = 1:size(obj.M.patient.list,1)
+                        patient_tag = regexp(obj.M.patient.list{i}, '[^\\/]+$', 'match', 'once');
+                        obj.M.patient.list{i} = fullfile(datasetFolder, 'derivatives', 'leaddbs', patient_tag);
+                    end
                     obj.allpatients = obj.M.patient.list;
                     obj.patientselection = obj.M.ui.listselect;
                 end
@@ -264,7 +269,7 @@ classdef ea_unifiedmapping < handle
         function calculate(obj)
             % check that this has not been calculated before:
             %first store the rois for automatic calculations
-            if ~isfield(obj.results,'roi')
+            if ~isfield(obj.results,'roi') && ~(obj.calcsettings.connectivity_type == 2)
                 if isfield(obj.M,'pseudoM')
                     vatlist = obj.M.ROI.list;
                 else
@@ -502,7 +507,9 @@ classdef ea_unifiedmapping < handle
             connid = (ea_unifiedmapping_conn2connid(obj.calcsettings.fibfilt_connectome));
             [pamlist,~] = ea_unifiedmapping_getpams(obj);
             [fibsvalBin, fibsvalprob,~, ~, ~, fibcell_pam, connFiberInd, totalFibers] = ea_unifiedmapping_calcvals_pam_prob(pamlist, obj, cfile);
+
             obj.results.fiberfiltering.(connid).('PAM_probA').fibsval = fibsvalprob;
+            obj.results.fiberfiltering.(connid).('PAM_Ttest').fibsval = fibsvalBin;
             obj.results.fiberfiltering.(connid).connFiberInd_PAM = connFiberInd;
             obj.results.fiberfiltering.(connid).totalFibers = totalFibers; % total number of fibers in the connectome to work with global indices
             obj.results.fiberfiltering.(connid).('pam_fibers').fibcell= fibcell_pam;
