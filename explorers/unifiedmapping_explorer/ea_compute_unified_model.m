@@ -46,7 +46,7 @@ function [Ihat,Ihat_train_global,val_struct] = ea_compute_unified_model(numTestI
     % fiber values can be sigmoid transform
     if strcmp(obj.statsettings.stimulationmodel, 'Sigmoid Field')
         if obj.calcsettings.connectivity_type == 2
-            fibsval = obj.results.(ea_conn2connid(obj.calcsettings.fibfilt_connectome)).('PAM_probA').fibsval;
+            fibsval = obj.results.fiberfiltering.(ea_conn2connid(obj.calcsettings.fibfilt_connectome)).('PAM_probA').fibsval;
         else
             fibsval_raw = fibsval;
             for side = 1:size(fibsval_raw,2)
@@ -123,6 +123,16 @@ function [Ihat,Ihat_train_global,val_struct] = ea_compute_unified_model(numTestI
                     orig_model{1} = obj.results.sweetspotmapping.efield{1}';
                     if size(obj.results.sweetspotmapping.efield,1)==2
                         orig_model{2} = obj.results.sweetspotmapping.efield{2}';
+                    end
+                    % Training statistics use sigmoid-transformed E-fields,
+                    % so prediction must use the same representation.
+                    if strcmp(obj.statsettings.stimulationmodel, 'Sigmoid Field')
+                        for modelSide = 1:numel(orig_model)
+                            if ~isempty(orig_model{modelSide})
+                                orig_model{modelSide} = ...
+                                    ea_SigmoidFromEfield(orig_model{modelSide});
+                            end
+                        end
                     end
                     orig_model_flat = vertcat(orig_model{:});
                 case 'fiberfiltering'
@@ -263,7 +273,6 @@ function [Ihat,Ihat_train_global,val_struct] = ea_compute_unified_model(numTestI
                                     Ihat(test,1, voter) = Ihat_all(test);
 
                                     testidx=find(test);
-                                    % allzerotestidx=testidx(~sum(orig_model_flat(:,test)));
                                     allzerotestidx = testidx(~ea_nansum(orig_model_flat(:,test)));
                                     Ihat(allzerotestidx,1, voter) = nan; % set Ihats to nan if there is no overlap with even a single VTA
 

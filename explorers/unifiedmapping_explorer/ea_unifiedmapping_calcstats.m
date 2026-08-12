@@ -1,5 +1,9 @@
 function [vals,fibcell,usedidx] = ea_unifiedmapping_calcstats(obj,patsel,Iperm)
 
+if ismethod(obj, 'repair_loaded_explorer')
+    obj.repair_loaded_explorer;
+end
+
 %No fibcell and usedidx for sweetspotmapping or networkmapping
 switch obj.drawTool
     case {'sweetspotmapping','networkmapping'}
@@ -52,16 +56,35 @@ switch obj.drawTool
         end
 
     case 'fiberfiltering' %fiberfiltering
-        connid = ea_conn2connid(obj.calcsettings.fibfilt_connectome);
+        connid = ea_conn2connid(obj.calcsettings.fibfilt_connectome);        
         if obj.calcsettings.connectivity_type == 2
-            init_val = obj.results.fiberfiltering.(connid).('PAM_probA').fibsval;
+            selectedFibcell = ...
+                obj.results.fiberfiltering.(connid).pam_fibers.fibcell;
+        
+        elseif strcmp(obj.e_field_metric, 'Projection')
+            selectedFibcell = ...
+                obj.results.fiberfiltering.(connid).efield_proj.fibcell;
+        
+        else
+            selectedFibcell = ...
+                obj.results.fiberfiltering.(connid).efield_fibers.fibcell;
+        end
+
+        if obj.calcsettings.connectivity_type == 2
+            switch obj.statsettings.stimulationmodel
+                case 'VTA'
+                    init_val = obj.results.fiberfiltering.(connid).('PAM_Ttest').fibsval;
+                otherwise
+                    init_val = obj.results.fiberfiltering.(connid).('PAM_probA').fibsval;
+            end
+                
         else
             switch obj.statsettings.stimulationmodel
                 case 'Sigmoid Field'
                     fibsval_raw = obj.results.fiberfiltering.(connid).(ea_unifiedmapping_method2methodid(obj)).fibsval;
                     init_val = fibsval_raw;  % initialize
                     for side = 1:size(fibsval_raw,2)
-                        init_val{1,side}(:,:) = ea_SigmoidFromEfield(fibsval_raw{1,side}(:,:));
+                        init_val{1,side}(:,:) = ea_unified_probabilityActivationFunction(fibsval_raw{1,side}(:,:));
                     end
                 otherwise
                     init_val = cellfun(@full, obj.results.fiberfiltering.(connid).(ea_unifiedmapping_method2methodid(obj)).fibsval, 'Uni', 0);
@@ -91,32 +114,69 @@ for group = groups
             pvals{group,side}=vals{group,side};
         end
         switch obj.drawTool
-            case {'sweetspotmapping','fiberfiltering'}
+            case 'sweetspotmapping'
                 switch obj.statsettings.stimulationmodel
+                    case 'VTA'
+                        % Sweet-spot calculation stores the thresholded input
+                        % maps for all stimulation models. Convert retained
+                        % voxels to a binary VTA here so two-sample tests see
+                        % explicit connected (1) and unconnected (0) groups.
+                        vtaValues = gval{side}(:,gpatsel);
+                        missingValues = isnan(vtaValues);
+                        vtaValues = double(vtaValues > 0);
+                        vtaValues(missingValues) = nan;
+                        gval{side}(:,gpatsel) = vtaValues;
+                        Nmap=ea_nansum(gval{side}(:,gpatsel),2);
+                        gval{side}(Nmap<((obj.statsettings.connthreshold/100)*length(gpatsel)),gpatsel)=nan;
+                    case 'Electric Field'
+                        % Optional legacy behavior for reproducing analyses
+                        % that treated low E-field values as missing. The
+                        % current default keeps these values (including zero)
+                        % unless the user explicitly sets a NaN threshold.
+                        if isfield(obj.statsettings, 'nanthreshold') && ...
+                                ~isempty(obj.statsettings.nanthreshold)
+                            gval{side}(gval{side} <= obj.statsettings.nanthreshold) = nan;
+                        end
+                        Nmap=ea_nansum((gval{side}(:,gpatsel)>obj.statsettings.efieldthreshold_spot),2);
+                        gval{side}(Nmap<round((obj.statsettings.connthreshold/100)*length(gpatsel)),gpatsel)=nan;
+                    case 'Sigmoid Field'
+                        gval{side}(:, gpatsel) = ea_SigmoidFromEfield(gval{side}(:, gpatsel));
+                        Nmap = ea_nansum( gval{side}(:, gpatsel) > obj.statsettings.efieldthreshold_spot, 2);
+                        minN = round((obj.statsettings.connthreshold / 100) * length(gpatsel)); 
+                        gval{side}(Nmap < minN, gpatsel) = nan;
+
+                end
+                %initialize vals and pvals if necessary
+
+                %rules for removing nonempty values, since there are many nans in
+                %the voxel wise analysis we can choose two different ways of
+                %dealing with the vals
+
+                % Two-sample tests require both connected and unconnected
+                % observations. Apply the upper coverage threshold before
+                % constructing valsin so overly common voxels are excluded from
+                % the data passed to the statistical test.
+                if strcmpi(obj.statsettings.statfamily, '2-Sample Tests')
+                    maxConnected = (1 - obj.statsettings.connthreshold/100) * length(gpatsel);
+                    gval{side}(Nmap > maxConnected, gpatsel) = nan;
+                end
+
+                nonempty = sum(gval{side}(:,gpatsel),2,'omitnan')>0;
+                nonemptyidx=find(nonempty);
+                valsin=gval{side}(nonempty,gpatsel);
+            case 'fiberfiltering'
+                    switch obj.statsettings.stimulationmodel
                     case 'VTA'
                         Nmap=ea_nansum(gval{side}(:,gpatsel),2);
                         gval{side}(Nmap<((obj.statsettings.connthreshold/100)*length(gpatsel)),gpatsel)=nan;
-                    otherwise
-                        % old method; only if variable in workspace exists
-                        if evalin('base','exist(''threshold_method'',''var'')')
-                            threshold_method = evalin('base','threshold_method');
-                            switch threshold_method
-                                case 'old_method' % as was implemented in lead dbs v3.2.1
-                                    gval{side}(gval{side}<=obj.statsettings.nanthreshold) = nan;
-                                    Nmap=ea_nansum((gval{side}(:,gpatsel)>obj.statsettings.efieldthreshold),2);
-                                    gval{side}(Nmap<round((obj.statsettings.connthreshold/100)*length(gpatsel)),gpatsel)=nan;
-                            end
-                        else %here we use the new percentile method
-                            % compute global percentile across all selected patients
-                            allVals = gval{side}(:, gpatsel);  % extract the submatrix
-                            allVals(allVals == 0) = NaN;
-                            thr = prctile(allVals(:), obj.statsettings.efieldthreshold);  % flatten and compute percentile
-                            % mask fibers above threshold
-                            Nmap = ea_nansum(gval{side}(:,gpatsel) >= thr, 2);
-                            % apply connection threshold
-                            gval{side}(Nmap < round((obj.statsettings.connthreshold/100) * length(gpatsel)), gpatsel) = nan;
-                        end  
-                end
+                    case 'Sigmoid Field'
+                        pafThreshold = obj.statsettings.efieldthreshold_tract;
+                        Nmap=ea_nansum((gval{side}(:,gpatsel)>pafThreshold),2);
+                        gval{side}(Nmap < round((obj.statsettings.connthreshold/100) * length(gpatsel)), gpatsel) = nan;
+                    case 'Electric Field'
+                        Nmap=ea_nansum((gval{side}(:,gpatsel)>obj.statsettings.efieldthreshold_tract),2);
+                        gval{side}(Nmap<round((obj.statsettings.connthreshold/100)*length(gpatsel)),gpatsel)=nan;
+                    end
                 
                 %initialize vals and pvals if necessary
 
@@ -124,27 +184,37 @@ for group = groups
                 %the voxel wise analysis we can choose two different ways of
                 %dealing with the vals
 
+                % Two-sample tests require both connected and unconnected
+                % observations. Apply the upper coverage threshold before
+                % constructing valsin so overly common fibers are excluded from
+                % the data passed to the statistical test.
+                if strcmpi(obj.statsettings.statfamily, '2-Sample Tests')
+                    maxConnected = (1 - obj.statsettings.connthreshold/100) * length(gpatsel);
+                    gval{side}(Nmap > maxConnected, gpatsel) = nan;
+                end
+
                 nonempty = sum(gval{side}(:,gpatsel),2,'omitnan')>0;
                 nonemptyidx=find(nonempty);
                 valsin=gval{side}(nonempty,gpatsel);
             case 'networkmapping'
-                if evalin('base','exist(''threshold_method'',''var'')')
-                    threshold_method = evalin('base','threshold_method');
-                        switch threshold_method
-                            case 'old_method'
-                                valsin = gval{side}(:,gpatsel);
-                        end
+              
+                allVals = gval{side}(:, gpatsel);  % extract the submatrix
+                % change the % from GUI to r
+                corrThreshold = obj.statsettings.efieldthreshold_network / 100;
 
-                else %here we use the old method
-                        % compute global percentile across all patients
-                        allVals = gval{side}(:, gpatsel);  % extract the submatrix
-                        % allVals(allVals == 0) = NaN;
-                        thr = prctile(allVals(:), obj.statsettings.efieldthreshold);  % flatten and compute percentile
-                        % mask voxels above threshold
-                        Nmap = ea_nansum(gval{side}(:,gpatsel) >= thr, 2);
-                        gval{side}(Nmap < round((obj.statsettings.connthreshold/100) * length(gpatsel)), gpatsel) = nan;
-                        valsin = gval{side}(:, gpatsel);
-                end  
+                % minimum patients required
+                minN = ceil((obj.statsettings.connthreshold / 100) * size(allVals,2));
+                        
+                
+                NmapPos = sum(allVals >= corrThreshold, 2, 'omitnan');
+                NmapNeg = sum(allVals <= -corrThreshold, 2, 'omitnan');
+               
+                keep = NmapPos >= minN | NmapNeg >= minN;
+                
+                % remove voxels not meeting the criteria
+                allVals(~keep, :) = nan;
+                gval{side}(:, gpatsel) = allVals;
+                valsin = allVals;                 
         end
 
         
@@ -165,13 +235,23 @@ for group = groups
         if ~is
             ea_error(['Function for test ',obj.statsettings.statset,' missing.']);
         end
+
+        % ranksum removes NaN outcomes and fails when either the connected
+        % or unconnected group is empty. Exclude untestable features here so
+        % the shared stat-test implementation does not need to be changed.
+        if strcmp(stattests.file(idx), 'ea_explorer_stats_ranksumtest') && ...
+                ismember(obj.drawTool, {'sweetspotmapping','fiberfiltering'})
+            finiteOutcome = isfinite(outcomein(:)).';
+            hasConnectedGroup = any((valsin == 1) & finiteOutcome, 2);
+            hasUnconnectedGroup = any((valsin == 0) & finiteOutcome, 2);
+            testable = hasConnectedGroup & hasUnconnectedGroup;
+
+            valsin = valsin(testable, :);
+            nonemptyidx = nonemptyidx(testable);
+        end
+
         %do the actual calculation
         if ~isempty(valsin) && ~isempty(outcomein)
-            if strcmp(obj.statsettings.statfamily,'2-sample Tests')
-                % only in case of VTAs (given two-sample-t-test statistic) do we
-                % need to also exclude if tract is connected to too many VTA
-                gval{side}(Nmap>((1-(obj.statsettings.connthreshold/100))*length(gpatsel)),gpatsel)=nan;
-            end
             [valsout,psout]=feval(stattests.file(idx),valsin,outcomein,obj.statsettings.H0); % apply test
             switch  obj.drawTool
                 case {'sweetspotmapping','fiberfiltering'}
@@ -197,11 +277,42 @@ for group = groups
     end
 end
 
+if obj.showsignificantonly
+    vals=ea_corrsignan(vals,pvals,obj);
+end
+
 if strcmp(obj.threshstrategy,'Unthresholded')
+    % Unthresholded means no magnitude/rank threshold, but the selected
+    % sign visibility still defines which values belong to the model. This
+    % mask is also used by cross-validation through the returned vals.
+    for group = groups
+        for side = 1:numel(gval)
+            if dosubscores || dogroups
+                if obj.subscore.special_case
+                    showPositive = obj.posvisible;
+                    showNegative = obj.negvisible;
+                else
+                    showPositive = obj.subscore.posvisible(group);
+                    showNegative = obj.subscore.negvisible(group);
+                end
+            else
+                showPositive = obj.posvisible;
+                showNegative = obj.negvisible;
+            end
+
+            if ~showPositive
+                vals{group,side}(vals{group,side} > 0) = nan;
+            end
+            if ~showNegative
+                vals{group,side}(vals{group,side} < 0) = nan;
+            end
+        end
+    end
+
     if strcmp(obj.drawTool,'fiberfiltering')
         for side=1:numel(gval)
             usedidx{group,side} = find(isfinite(vals{group,side}));
-            fibcell{group,side} = obj.results.fiberfiltering.(ea_conn2connid(obj.calcsettings.fibfilt_connectome)).fibcell{side}(usedidx{group,side});
+            fibcell{group,side} = selectedFibcell{side}(usedidx{group,side});            
             vals{group,side} = vals{group,side}(usedidx{group,side}); % final weights for surviving fibers
             if exist('pvals','var')
                 pvals{group,side} = pvals{group,side}(usedidx{group,side}); % final weights for surviving fibers
@@ -240,8 +351,7 @@ else
         for group=groups
             for side=1:numel(gval)
                 usedidx{group,side} = find(isfinite(vals{group,side}));
-                fibcell{group,side} = obj.results.fiberfiltering.(ea_conn2connid(obj.calcsettings.fibfilt_connectome)).fibcell{side}(usedidx{group,side});
-                vals{group,side} = vals{group,side}(usedidx{group,side}); % final weights for surviving fibers
+                fibcell{group,side} = selectedFibcell{side}(usedidx{group,side});                vals{group,side} = vals{group,side}(usedidx{group,side}); % final weights for surviving fibers
                 if exist('pvals','var')
                     pvals{group,side} = pvals{group,side}(usedidx{group,side}); % final weights for surviving fibers
                 end
@@ -336,6 +446,21 @@ else
 
 end
 function AllX=ea_get_AllX(obj)
+connid = ea_conn2connid(obj.calcsettings.netmap_connectome);
+basefield = 'connval';
+cacheRoot = obj.results.networkmapping.(connid);
+if isprop(obj, 'mask_vta_fp') && obj.mask_vta_fp
+    if isfield(cacheRoot, 'connval_vtamasked')
+        basefield = 'connval_vtamasked';
+        cachefield = 'vtamasked';
+    else
+        warning('VTA-masked network fingerprints were requested, but connval_vtamasked is missing. Falling back to unmasked fingerprints.');
+        cachefield = '';
+    end
+else
+    cachefield = '';
+end
+
 addchar='';
 if obj.smooth_fp
     addchar=[addchar,'s'];
@@ -344,14 +469,22 @@ if obj.normalize_fp
     addchar=[addchar,'k'];
 end
 if isempty(addchar) % no s, no k
-    AllX=obj.results.networkmapping.(ea_conn2connid(obj.calcsettings.netmap_connectome)).connval;
+    AllX=cacheRoot.(basefield);
     return
 end
 try
-    AllX=obj.results.networkmapping.(ea_conn2connid(obj.calcsettings.netmap_connectome)).(ea_conn2connid(lower(obj.cvmask))).(addchar).connval;
+    if isempty(cachefield)
+        AllX=obj.results.networkmapping.(connid).(ea_conn2connid(lower(obj.cvmask))).(addchar).connval;
+    else
+        AllX=obj.results.networkmapping.(connid).(cachefield).(ea_conn2connid(lower(obj.cvmask))).(addchar).connval;
+    end
 catch
-    [AllX] = ea_unified_networkmapping_recalcvals_sk(obj,addchar);
-    obj.results.networkmapping.(ea_conn2connid(obj.calcsettings.netmap_connectome)).(ea_conn2connid(lower(obj.cvmask))).(addchar).connval=AllX;
+    [AllX] = ea_unified_networkmapping_recalcvals_sk(obj, addchar, basefield);
+    if isempty(cachefield)
+        obj.results.networkmapping.(connid).(ea_conn2connid(lower(obj.cvmask))).(addchar).connval=AllX;
+    else
+        obj.results.networkmapping.(connid).(cachefield).(ea_conn2connid(lower(obj.cvmask))).(addchar).connval=AllX;
+    end
 end
 
 function fibValThreshold = ea_fibValThresh(threshstrategy, vals, threshold)
