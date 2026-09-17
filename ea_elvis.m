@@ -358,6 +358,14 @@ if ~strcmp(options.patientname,'No Patient Selected') % if not initialize empty 
                 'TooltipString','Stimulation Control Figure',...
                 'ClickedCallback',{@openstimviewer,elstruct,resultfig,options});
         end
+        % Initialize StimFit-Ladder-Button (StimFit_v2/viz on the path and a
+        % ladder export present for this subject; otherwise absent entirely).
+        if ~strcmp(options.leadprod, 'group') && exist('ladderviz_available','file')==2 ...
+                && ladderviz_available(options)
+            stimfitbutton = uipushtool(ht,'CData',ea_get_icn('fibers_vat'),...
+                'TooltipString','StimFit Ladder Explorer',...
+                'ClickedCallback',{@openstimfitladder,resultfig,options});
+        end
         if ~strcmp(options.leadprod, 'group') && options.prefs.env.dev
             stimbutton = uipushtool(ht,'CData',ea_get_icn('programmer'),...
                 'TooltipString','Lead Programmer',...
@@ -667,6 +675,13 @@ function openstimviewer(hobj,ev,elstruct,resultfig,options)
 stimwin=ea_stimparams(elstruct,gcf,options);
 setappdata(resultfig,'stimwin',stimwin);
 % try WinOnTop(stimwin,true); end
+
+
+function openstimfitladder(hobj,ev,resultfig,options)
+% Satellite window lives in StimFit_v2/viz. Stored as 'stimfitwin' so
+% closesatellites tears it down with the scene.
+stimfitwin=ladderviz_open(resultfig,options);
+setappdata(resultfig,'stimfitwin',stimfitwin);
 
 
 function opencortexviewer(hobj,ev,resultfig,options)
