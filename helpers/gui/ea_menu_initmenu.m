@@ -111,8 +111,9 @@ if isempty(menuprobe)
         z=uimenu(e,'Label','Export .zip files for selected patient(s)');
         lsm=uimenu(e,'Label','Export Reconstruction to webserver for selected patient(s)');
         for fis=1:length(fn)
-            uimenu(z,'Label',fn{fis},'Callback',{@ea_exportpat,'ZIP',handles,fn{fis}});
-            uimenu(lsm,'Label',fn{fis},'Callback',{@ea_exportpat,'LS',handles,fn{fis}});
+            label=strrep(fn{fis},'_','-'); % e.g. VIM_VOA_VOP -> VIM-VOA-VOP
+            uimenu(z,'Label',label,'Callback',{@ea_exportpat,'ZIP',handles,fn{fis}});
+            uimenu(lsm,'Label',label,'Callback',{@ea_exportpat,'LS',handles,fn{fis}});
         end
         d = uimenu(f,'Label','Convert');
         uimenu(d,'Label','Convert selected atlas to .STL','Callback',{@ea_exportatlas,'STL',handles});
