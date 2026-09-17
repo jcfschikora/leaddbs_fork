@@ -38,19 +38,30 @@ for i = 1:numel(oldSubjId)
     new = newSubjId{i};
     ea_cprintf('*Comment', 'Renaming subj %s to %s ...\n', old, new);
 
-    if isfolder(fullfile(BIDSRoot, 'derivatives', 'leaddbs', ['sub-', old]))
-        movefile(fullfile(BIDSRoot, 'derivatives', 'leaddbs', ['sub-', old]), ...
-                 fullfile(BIDSRoot, 'derivatives', 'leaddbs', ['sub-', new]));
-    end
+    parentDirs = {fullfile(BIDSRoot, 'derivatives', 'leaddbs'), ...
+                  fullfile(BIDSRoot, 'rawdata'), ...
+                  fullfile(BIDSRoot, 'sourcedata')};
 
-    if isfolder(fullfile(BIDSRoot, 'rawdata', ['sub-', old]))
-        movefile(fullfile(BIDSRoot, 'rawdata', ['sub-', old]), ...
-                 fullfile(BIDSRoot, 'rawdata', ['sub-', new]));
-    end
-
-    if isfolder(fullfile(BIDSRoot, 'sourcedata', ['sub-', old]))
-        movefile(fullfile(BIDSRoot, 'sourcedata', ['sub-', old]), ...
-                 fullfile(BIDSRoot, 'sourcedata', ['sub-', new]));
+    movedDirs = {};
+    try
+        for d = 1:numel(parentDirs)
+            if isfolder(fullfile(parentDirs{d}, ['sub-', old]))
+                moveSubjDir(parentDirs{d}, ['sub-', old], ['sub-', new]);
+                movedDirs{end+1} = parentDirs{d};
+            end
+        end
+    catch ME
+        % Undo the folders which were already renamed, so that a failure never
+        % leaves the subj split over two subjIDs.
+        for d = 1:numel(movedDirs)
+            try
+                moveSubjDir(movedDirs{d}, ['sub-', new], ['sub-', old]);
+            catch
+                ea_cprintf('CmdWinErrors', 'Failed to roll back "%s"!\n', ...
+                           fullfile(movedDirs{d}, ['sub-', new]));
+            end
+        end
+        rethrow(ME);
     end
 
     if ~opts.blindRename
@@ -101,4 +112,45 @@ for i = 1:numel(oldSubjId)
         end
         save(statsBackupFile, 'ea_stats');
     end
+end
+
+
+function moveSubjDir(parentDir, oldName, newName)
+% Rename a subj folder in place.
+%
+% Prefer an atomic rename (a single rename() syscall): it is instant and,
+% unlike MATLAB's movefile (which copies the tree recursively), it never
+% enumerates the folder. That matters on exFAT/FAT/SMB volumes, where macOS
+% keeps xattrs in AppleDouble sidecars ('._*') which the kernel creates and
+% removes implicitly while a sibling is copied, invalidating the listing
+% mid-walk. Fall back to movefile for genuine cross-volume moves.
+
+src = fullfile(parentDir, oldName);
+dst = fullfile(parentDir, newName);
+
+if isfolder(dst)
+    error('Destination folder "%s" already exists!', dst);
+end
+
+renamed = false;
+if usejava('jvm')
+    renamed = java.io.File(src).renameTo(java.io.File(dst));
+end
+
+if ~renamed
+    [status, msg] = movefile(src, dst);
+    if ~status
+        error(['Failed to move "%s" to "%s": %s\n', ...
+               'The destination may be partially written, check it before retrying.'], ...
+              src, dst, msg);
+    end
+end
+
+if ~isfolder(dst) || isfolder(src)
+    error('Move of "%s" to "%s" did not complete!', src, dst);
+end
+
+% Drop the AppleDouble sidecar of the old folder in case macOS didn't carry it over
+if ismac
+    ea_delete(fullfile(parentDir, ['._', oldName]));
 end
