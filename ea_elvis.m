@@ -797,17 +797,13 @@ end
 
 function export_viewset_screenshots(hobj,ev,resultfig)
 % Pick one of the stored export view sets and render its screenshots from this
-% scene. Only the camera and slice planes of the set are used, see
-% js_scene_screenshots in leaddbs_extensions.
-viewsets=load([ea_getearoot,'helpers',filesep,'export',filesep,'ea_exportviews']);
-fn=fieldnames(viewsets);
-labels=strrep(fn,'_','-'); % e.g. VIM_VOA_VOP -> VIM-VOA-VOP, as in ea_menu_initmenu
-index=listdlg('PromptString','Select export view set','ListString',labels,...
-    'SelectionMode','single','CancelString','Cancel');
-if isempty(index)
+% scene. Only the camera and slice planes of the set are used. The picker and
+% the renderer live in leaddbs_extensions/scene_export.
+[target,suffix]=js_pick_exportview;
+if isempty(target)
     return
 end
-js_scene_screenshots(resultfig,fn{index});
+js_scene_screenshots(resultfig,target,'Suffix',suffix);
 
 
 function dump_screenshot(hobj,ev,resultfig,options)
