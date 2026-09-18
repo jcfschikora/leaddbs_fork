@@ -492,6 +492,14 @@ end
 dumpscreenshotbutton=uipushtool(ht,'CData',ea_get_icn('dump'),...
     'TooltipString','Dump Screenshot','ClickedCallback',{@dump_screenshot,resultfig,options});
 
+% Initialize Export-Views-Screenshot button (renderer lives in
+% leaddbs_extensions/scene_export; absent entirely when not on the path).
+if exist('js_scene_screenshots','file')==2
+    exportviewsbutton=uipushtool(ht,'CData',ea_get_icn('export'),...
+        'TooltipString','Save screenshots of an export view set',...
+        'ClickedCallback',{@export_viewset_screenshots,resultfig});
+end
+
 hdsavebutton=uipushtool(ht,'CData',ea_get_icn('save'),...
     'TooltipString','Save Scene','ClickedCallback',@export_hd);
 dofsavebutton=uipushtool(ht,'CData',ea_get_icn('save_depth'),...
@@ -785,6 +793,21 @@ if FileName
     % imwrite(cdata, [PathName,FileName], 'png');
     ea_screenshot([PathName,FileName],'myaa');
 end
+
+
+function export_viewset_screenshots(hobj,ev,resultfig)
+% Pick one of the stored export view sets and render its screenshots from this
+% scene. Only the camera and slice planes of the set are used, see
+% js_scene_screenshots in leaddbs_extensions.
+viewsets=load([ea_getearoot,'helpers',filesep,'export',filesep,'ea_exportviews']);
+fn=fieldnames(viewsets);
+labels=strrep(fn,'_','-'); % e.g. VIM_VOA_VOP -> VIM-VOA-VOP, as in ea_menu_initmenu
+index=listdlg('PromptString','Select export view set','ListString',labels,...
+    'SelectionMode','single','CancelString','Cancel');
+if isempty(index)
+    return
+end
+js_scene_screenshots(resultfig,fn{index});
 
 
 function dump_screenshot(hobj,ev,resultfig,options)
