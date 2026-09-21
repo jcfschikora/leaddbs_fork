@@ -193,6 +193,13 @@ if isempty(menuprobe)
     uimenu(u,'Label','Upload to S-Drive','Callback',{@js_upload2sdrive,handles});
     uimenu(u,'Label','Update Patient Metadata','Callback',{@js_update_metadata,handles});
 
+    % Extensions menu (leaddbs_extensions repo), Lead-DBS main GUI only
+    if ismember('dbs', cmd) && exist('js_multinorm_adopt', 'file') == 2
+        x = uimenu('Label', 'Extensions');
+        xn = uimenu(x, 'Label', 'Normalizations');
+        uimenu(xn, 'Label', 'Adopt normalization from a variant...', 'Callback', {@js_multinorm_adopt, handles});
+    end
+
     % mark that menu has already been installed.
 	setappdata(handles.leadfigure,'menuprobe',1);
 end

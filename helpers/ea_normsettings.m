@@ -14,7 +14,12 @@ names = cellfun(@(x) eval([x, '(''prompt'');']), funcs, 'Uni', 0);
 
 % Get current normalization function
 normMethod = handles.(handlestring).String{handles.(handlestring).Value};
-normFunc = funcs{find(ismember(names, normMethod), 1)};
+normFuncInd = find(ismember(names, normMethod), 1);
+if isempty(normFuncInd) % Entry not backed by an ea_normalize_* function (e.g. an extension)
+    set(handles.normsettings, 'Enable', 'off');
+    return
+end
+normFunc = funcs{normFuncInd};
 
 % Check if the method has setting available
 [~, ~, hassettings] = feval(normFunc, 'prompt');

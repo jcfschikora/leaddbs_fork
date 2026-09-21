@@ -48,6 +48,17 @@ end
 % Check for special characters in the path
 ea_checkSpecialChars(uipatdirs);
 
+% Extension hook: "Duplicate and run selected normalizations..." entry of the
+% normalization method dropdown (leaddbs_extensions/multinorm) takes over the
+% run for the selected patients.
+if strcmp(cmd, 'run') && exist('js_multinorm', 'file') == 2 ...
+        && isfield(options, 'normalize') && isfield(options.normalize, 'method') ...
+        && options.normalize.do && strcmp(options.normalize.method, js_multinorm('prompt'))
+    options.uipatdirs = uipatdirs;
+    js_multinorm(options);
+    return
+end
+
 % do parallel processing if available and set in prefs.
 if length(uipatdirs)>1 && ~isempty(which('parpool')) && options.prefs.pp.do && ~strcmp(cmd,'export')
     try

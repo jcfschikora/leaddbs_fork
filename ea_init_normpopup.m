@@ -12,6 +12,11 @@ funcs = ea_regexpdir(ea_getearoot, 'ea_normalize_.*\.m$', 0);
 funcs = regexp(funcs, '(ea_normalize_.*)(?=\.m)', 'match', 'once');
 names = cellfun(@(x) eval([x, '(''prompt'');']), funcs, 'Uni', 0);
 
+% Extension entry (leaddbs_extensions/multinorm), main GUI dropdown only
+if strcmp(handlestring, 'normmethod') && exist('js_multinorm', 'file') == 2
+    names{end+1} = js_multinorm('prompt');
+end
+
 % Set names to popupmenu
 set(handles.(handlestring), 'String', names);
 
