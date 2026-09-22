@@ -198,6 +198,9 @@ if isempty(menuprobe)
         x = uimenu('Label', 'Extensions');
         xn = uimenu(x, 'Label', 'Normalizations');
         uimenu(xn, 'Label', 'Adopt normalization from a variant...', 'Callback', {@js_multinorm_adopt, handles});
+        if exist('js_multinorm_compare', 'file') == 2
+            uimenu(xn, 'Label', 'Compare normalization variants in Slicer...', 'Callback', {@js_multinorm_compare, handles});
+        end
     end
 
     % mark that menu has already been installed.
