@@ -32,7 +32,9 @@ classdef ea_unifiedmapping < handle
         predictionmodel = 'Linear'; % type of glm used to fit fiber values to actual scores
         showsignificantonly = 0
         alphalevel = 0.05
-        multcompstrategy = 'FDR'; % could be 'Bonferroni'
+        multcompstrategy = 'FDR'; % could be 'Bonferroni', 'Uncorrected', 'Permutation Threshold (Uncorr)', or 'Permutation Threshold (max-statistics)'
+        multcompNperm = 1000 % number of shuffles used by the permutation-based multcompstrategy options (see ea_unified_permutation_nulldist.m / ea_unified_permutation_threshold.m)
+        multcompmaxworkers = 3 % cap on parpool workers for the permutation-threshold parfor loop, if Parallel Computing Toolbox is available
         subscore
         explorerdrawn
         results = struct
@@ -572,7 +574,10 @@ classdef ea_unifiedmapping < handle
             else
                 [vatlist,~] = ea_unifiedmapping_getvats(obj);
             end
-            [fibsvalBin, fibsvalSum, fibsvalMean, fibsvalPeak, fibsval5Peak, fibcell_efield,  connFiberInd, totalFibers] = ea_fiberfiltering_calcvals(vatlist, cfile, obj.calcsettings.calcthreshold);
+            [fibsvalBin, fibsvalSum, fibsvalMean, fibsvalPeak, ...
+                fibsval5Peak, fibsvalSigmoidPeak, fibcell_efield, ...
+                connFiberInd, totalFibers] = ea_fiberfiltering_calcvals( ...
+                vatlist, cfile, obj.calcsettings.calcthreshold);
             obj.results.fiberfiltering.(connid).('VAT_Ttest').fibsval = fibsvalBin;
             obj.results.fiberfiltering.(connid).connFiberInd_VAT = connFiberInd; % old fiberfiltering files do not have these data and will fail when using pathway atlases
             obj.results.fiberfiltering.(connid).totalFibers = totalFibers; % total number of fibers in the connectome to work with global indices
@@ -581,6 +586,8 @@ classdef ea_unifiedmapping < handle
             obj.results.fiberfiltering.(connid).('efield_mean').fibsval = fibsvalMean;
             obj.results.fiberfiltering.(connid).('efield_peak').fibsval = fibsvalPeak;
             obj.results.fiberfiltering.(connid).('efield_5peak').fibsval = fibsval5Peak;
+            obj.results.fiberfiltering.(connid).('efield_sigmoid_peak').fibsval = ...
+                fibsvalSigmoidPeak;
             obj.results.fiberfiltering.(connid).('plainconn').fibsval = fibsvalBin;
             obj.results.fiberfiltering.(connid).('efield_fibers').fibcell= fibcell_efield;
             % temp. duplicate fibcell, will be fixed in the new explorer
@@ -592,7 +599,7 @@ classdef ea_unifiedmapping < handle
 
         function calculate_on_fibers(obj,cfile)
             connid = (ea_unifiedmapping_conn2connid(obj.calcsettings.fibfilt_connectome));
-            
+
           
             % OSS-DBS E-field should be computed (not just warped!) in this space
             
@@ -625,6 +632,10 @@ classdef ea_unifiedmapping < handle
             obj.results.fiberfiltering.(connid).('efield_mean').fibsval = fibsvalMean_magn;
             obj.results.fiberfiltering.(connid).('efield_peak').fibsval = fibsvalPeak_magn;
             obj.results.fiberfiltering.(connid).('efield_5peak').fibsval = fibsval5Peak_magn;
+            sigmoidPeakMagn = cellfun( ...
+                @localSigmoidPreserveZeros, fibsvalPeak_magn, 'Uni', 0);
+            obj.results.fiberfiltering.(connid).('efield_sigmoid_peak').fibsval = ...
+                sigmoidPeakMagn;
             obj.results.fiberfiltering.(connid).('plainconn').fibsval = fibsvalBin_magn;
             obj.results.fiberfiltering.(connid).('efield_fibers').fibcell = fibcell_magn;
             obj.results.fiberfiltering.(connid).('efield_fibers').connFiberInd_VAT = connFiberInd_magn; % old fiberfiltering files do not have these data and will fail when using pathway atlases
@@ -634,6 +645,10 @@ classdef ea_unifiedmapping < handle
             obj.results.fiberfiltering.(connid).('efield_proj_mean').fibsval = fibsvalMean_proj;
             obj.results.fiberfiltering.(connid).('efield_proj_peak').fibsval = fibsvalPeak_proj;
             obj.results.fiberfiltering.(connid).('efield_proj_5peak').fibsval = fibsval5Peak_proj;
+            sigmoidPeakProj = cellfun( ...
+                @localSigmoidPreserveZeros, fibsvalPeak_proj, 'Uni', 0);
+            obj.results.fiberfiltering.(connid).('efield_proj_sigmoid_peak').fibsval = ...
+                sigmoidPeakProj;
             obj.results.fiberfiltering.(connid).('plainconn_proj').fibsval = fibsvalBin_proj;
             obj.results.fiberfiltering.(connid).('efield_proj').fibcell = fibcell_proj;
             obj.results.fiberfiltering.(connid).('efield_proj').connFiberInd_VAT = connFiberInd_proj; % old fiberfiltering files do not have these data and will fail when using pathway atlases
@@ -1221,7 +1236,18 @@ classdef ea_unifiedmapping < handle
 
                     fibsval = full(obj.results.fiberfiltering.(ea_unifiedmapping_conn2connid(obj.calcsettings.fibfilt_connectome)).(S.fibsvalType).fibsval);
                 else
-                    fibsval = full(obj.results.fiberfiltering.(ea_unifiedmapping_conn2connid(obj.calcsettings.fibfilt_connectome)).(ea_unifiedmapping_method2methodid(obj)).fibsval);
+                    connid = ea_unifiedmapping_conn2connid( ...
+                        obj.calcsettings.fibfilt_connectome);
+                    if strcmp(obj.statsettings.stimulationmodel, ...
+                            'Sigmoid Field') && ...
+                            obj.calcsettings.connectivity_type ~= 2
+                        fibsval = ...
+                            ea_unifiedmapping_getsigmoidfiberfibsval( ...
+                            obj, connid);
+                    else
+                        fibsval = obj.results.fiberfiltering.(connid).( ...
+                            ea_unifiedmapping_method2methodid(obj)).fibsval;
+                    end
                 end
             else
                 fibsval = {};
@@ -1308,6 +1334,28 @@ classdef ea_unifiedmapping < handle
                     Predicted_scores(test) = Ihat_voters_prediction(1:end,1); % only one value here atm
                 end
 
+            end
+
+            % Report how many fibers survived significance thresholding
+            % (e.g. permutation-based, uncorrected or max-statistic) for
+            % each cross-validation fold's training-set model.
+            if ~silent && obj.showsignificantonly && strcmp(obj.drawTool,'fiberfiltering') && ...
+                    iscell(val_struct) && ~isempty(val_struct) && isstruct(val_struct{1}) && ...
+                    isfield(val_struct{1},'usedidx') && ~isempty(val_struct{1}.usedidx)
+                nSides = size(val_struct{1}.usedidx,2);
+                nFibersPerFold = nan(cvp.NumTestSets, nSides);
+                for foldidx=1:cvp.NumTestSets
+                    for side=1:nSides
+                        nFibersPerFold(foldidx,side) = numel(val_struct{foldidx}.usedidx{1,side});
+                    end
+                end
+                fprintf('\nFibers kept for the model per fold (significance-thresholded):\n');
+                foldfmt = ['  Fold %0', num2str(numel(num2str(cvp.NumTestSets))), 'd: %s\n'];
+                for foldidx=1:cvp.NumTestSets
+                    fprintf(foldfmt, foldidx, mat2str(nFibersPerFold(foldidx,:)));
+                end
+                fprintf('  Mean across folds: %s\n', mat2str(round(mean(nFibersPerFold,1))));
+                fprintf('  Min / Max across folds: %s / %s\n\n', mat2str(min(nFibersPerFold,[],1)), mat2str(max(nFibersPerFold,[],1)));
             end
 
             % check if binary variable and not permutation test
@@ -2046,6 +2094,18 @@ else
     desc = 'negative';
 end
 end
+
+function sigmoidValues = localSigmoidPreserveZeros(values)
+% Transform calculated fiber values without converting structural zeros.
+sigmoidValues = sparse(size(values, 1), size(values, 2));
+nonzeroIndex = find(values);
+if ~isempty(nonzeroIndex)
+    sigmoidValues(nonzeroIndex) = ...
+        ea_unified_probabilityActivationFunction( ...
+        full(values(nonzeroIndex)));
+end
+end
+
 function fibers=ea_fibcell2fibmat(fibers)
 [idx,~]=cellfun(@size,fibers);
 fibers=cell2mat(fibers);
